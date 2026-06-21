@@ -1941,10 +1941,16 @@ class ElectrumX(SessionBase):
             last_height = start_height + count - 1
             result.update(await self._merkle_proof(cp_height, last_height))
 
+        # Split the concatenated buffer at header boundaries. header_offset()
+        # returns absolute byte offsets in the headers file, so subtract the
+        # offset of start_height to make them relative to this buffer. (The
+        # original code assumed offsets from height 0, which only works for
+        # fixed-size headers; it mis-splits variable-length headers.)
+        base = self.db.header_offset(start_height)
         cursor = 0
-        height = 0
+        height = start_height
         while cursor < len(headers):
-            next_cursor = self.db.header_offset(height + 1)
+            next_cursor = self.db.header_offset(height + 1) - base
             header = headers[cursor:next_cursor]
             result['headers'].append(header.hex())
             cursor = next_cursor
@@ -2685,11 +2691,19 @@ class AuxPoWElectrumX(ElectrumX):
 
 
 class BitmarkElectrumX(AuxPoWElectrumX):
-    '''Bitmark is multi-algorithm: most headers are 80 bytes but equihash
-    headers are ~1487. Truncating auxpow-bearing headers to a fixed 80 bytes
-    (as the base AuxPoW session does) would corrupt equihash headers, so
-    truncate to the natural pure-header length (80 or the full equihash
-    header) -- which is exactly the part that forms the block identity hash.'''
+    '''Bitmark header serving.
+
+    Two differences from the base AuxPoW session:
+    1. Bitmark is multi-algorithm: most headers are 80 bytes but equihash
+       headers are ~1487. Truncating to a fixed TRUNCATED_HEADER_SIZE (80)
+       would corrupt equihash headers, so we truncate to the natural
+       pure-header length (the part that forms the block identity hash).
+    2. We strip the auxpow blob ALWAYS, not only for checkpoint-covered
+       requests. The wallet never verifies auxpow PoW, and Bitmark headers
+       are variable length, so a full-auxpow header in a chunk cannot be
+       re-split by the client. Always serving pure headers keeps the wallet
+       simple and is correct (auxpow is not part of the identity hash).'''
+
     def truncate_auxpow_single(self, header: str):
         raw = bytes.fromhex(header)
         pure_len = self.coin.DESERIALIZER.pure_header_len(raw)
