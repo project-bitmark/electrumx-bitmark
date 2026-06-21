@@ -50,6 +50,7 @@ import electrumx.server.block_processor as block_proc
 import electrumx.server.daemon as daemon
 from electrumx.server.session import (ElectrumX, DashElectrumX,
                                       SmartCashElectrumX, AuxPoWElectrumX,
+                                      BitmarkElectrumX,
                                       NameIndexElectrumX, NameIndexAuxPoWElectrumX)
 
 
@@ -2950,6 +2951,7 @@ class Bitmark(AuxPowMixin, Coin):
     GENESIS_HASH = ('c1fb746e87e89ae75bdec2ef0639a1f6'
                     '786744639ce3d0ece1dcf979b79137cb')
     DESERIALIZER = lib_tx.DeserializerBitmark
+    SESSIONCLS = BitmarkElectrumX   # multi-algo-aware auxpow truncation
     TX_COUNT = 2400000
     TX_COUNT_HEIGHT = 2399830
     TX_PER_BLOCK = 2

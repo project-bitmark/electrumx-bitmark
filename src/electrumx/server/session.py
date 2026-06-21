@@ -2684,6 +2684,18 @@ class AuxPoWElectrumX(ElectrumX):
         return header[:2*self.coin.TRUNCATED_HEADER_SIZE]
 
 
+class BitmarkElectrumX(AuxPoWElectrumX):
+    '''Bitmark is multi-algorithm: most headers are 80 bytes but equihash
+    headers are ~1487. Truncating auxpow-bearing headers to a fixed 80 bytes
+    (as the base AuxPoW session does) would corrupt equihash headers, so
+    truncate to the natural pure-header length (80 or the full equihash
+    header) -- which is exactly the part that forms the block identity hash.'''
+    def truncate_auxpow_single(self, header: str):
+        raw = bytes.fromhex(header)
+        pure_len = self.coin.DESERIALIZER.pure_header_len(raw)
+        return header[:2 * pure_len]
+
+
 class NameIndexElectrumX(ElectrumX):
     def set_request_handlers(self, ptuple):
         super().set_request_handlers(ptuple)
