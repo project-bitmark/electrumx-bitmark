@@ -1,0 +1,31 @@
+[Unit]
+Description=ElectrumX Server for Bitmark
+After=network.target bitmarkd.service
+
+[Service]
+Type=simple
+User=electrumx
+Group=electrumx
+
+# Environment configuration
+EnvironmentFile=/etc/electrumx-bitmark.conf
+
+# Working directory
+WorkingDirectory=/opt/electrumx-bitmark
+
+# Start command
+ExecStart=/opt/electrumx-bitmark/venv/bin/python electrumx_server
+
+# Restart on failure
+Restart=on-failure
+RestartSec=10
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/electrumx-bitmark
+
+[Install]
+WantedBy=multi-user.target

@@ -2928,6 +2928,42 @@ class Myriadcoin(AuxPowMixin, Coin):
     RPC_PORT = 10889
 
 
+class Bitmark(AuxPowMixin, Coin):
+    # Bitmark is a Myriadcoin-family chain: multi-algorithm PoW with the
+    # algorithm encoded in the version field, plus AuxPoW (merged mining)
+    # on some blocks.  ElectrumX trusts the daemon for PoW validation, so
+    # the block identity hash is the standard double-SHA256 of the 80-byte
+    # base header (Bitmark's `hash`, distinct from its algo-specific
+    # `powhash`).  Bitmark does not use SegWit, so the non-SegWit AuxPow
+    # deserializer is used.
+    NAME = "Bitmark"
+    SHORTNAME = "BTM"
+    NET = "mainnet"
+    P2PKH_VERBYTE = bytes.fromhex("55")  # addresses start with 'b'
+    P2SH_VERBYTES = (bytes.fromhex("05"),)
+    GENESIS_HASH = ('c1fb746e87e89ae75bdec2ef0639a1f6'
+                    '786744639ce3d0ece1dcf979b79137cb')
+    DESERIALIZER = lib_tx.DeserializerAuxPow
+    TX_COUNT = 2400000
+    TX_COUNT_HEIGHT = 2399830
+    TX_PER_BLOCK = 2
+    REORG_LIMIT = 2000
+    RPC_PORT = 9266
+
+
+class BitmarkTestnet(Bitmark):
+    NAME = "Bitmark"
+    SHORTNAME = "tBTM"
+    NET = "testnet"
+    P2PKH_VERBYTE = bytes.fromhex("6f")
+    P2SH_VERBYTES = (bytes.fromhex("c4"),)
+    # TODO: confirm against a live testnet node before relying on testnet.
+    GENESIS_HASH = ('00000000000000000000000000000000'
+                    '00000000000000000000000000000000')
+    RPC_PORT = 19266
+    REORG_LIMIT = 8000
+
+
 class MyriadcoinTestnet(Myriadcoin):
     NAME = "Myriadcoin"
     SHORTNAME = "XMT"
