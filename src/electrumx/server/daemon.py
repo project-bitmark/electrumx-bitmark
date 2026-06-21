@@ -305,7 +305,12 @@ class Daemon:
         if await self._is_rpc_available('estimatesmartfee'):
             estimate = await self._send_single('estimatesmartfee', args)
             return estimate.get('feerate', -1)
-        return await self._send_single('estimatefee', args)
+        if await self._is_rpc_available('estimatefee'):
+            return await self._send_single('estimatefee', args)
+        # Older daemons (e.g. Bitmark v0.9.7.4) have no fee-estimation RPC.
+        # Return -1 ("no estimate") rather than letting a Method-not-found
+        # daemon error tear down the client session.
+        return -1
 
     async def getnetworkinfo(self):
         '''Return the result of the 'getnetworkinfo' RPC call.'''
@@ -323,7 +328,19 @@ class Daemon:
             cache_val, cache_time = self._mempoolinfo_cache
             if time.time() - cache_time < 60:  # seconds
                 return cache_val
-            val = await self._send_single('getmempoolinfo')
+            if await self._is_rpc_available('getmempoolinfo'):
+                val = await self._send_single('getmempoolinfo')
+            else:
+                # Older daemons (e.g. Bitmark v0.9.7.4) have no getmempoolinfo.
+                # Synthesize the fee fields ElectrumX needs from the relay fee
+                # reported by getnetworkinfo, so fee/mempool queries don't tear
+                # down the client session.
+                try:
+                    relay = (await self.getnetworkinfo()).get('relayfee', 0.00001)
+                except Exception:
+                    relay = 0.00001
+                val = {'mempoolminfee': relay, 'minrelaytxfee': relay,
+                       'incrementalrelayfee': relay, 'size': 0, 'bytes': 0}
             self._mempoolinfo_cache = (val, time.time())
             return val
 
