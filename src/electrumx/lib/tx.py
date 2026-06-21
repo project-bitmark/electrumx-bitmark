@@ -480,6 +480,115 @@ class DeserializerAuxPowSegWit(DeserializerSegWit, DeserializerAuxPow):
     pass
 
 
+class DeserializerBitmark(DeserializerAuxPow):
+    '''Bitmark multi-algorithm PoW serializer.
+
+    Bitmark encodes the mining algorithm in the block version (bit 8 =
+    auxpow, bits 9-11 = algo).  This changes the header layout per block:
+
+      * Equihash blocks use an extended header -- an extra 32-byte
+        hashReserved after the merkle root, plus a 256-bit nonce and a
+        length-prefixed solution vector in place of the 4-byte nonce.
+      * All other algos use the standard 80-byte header.
+      * AuxPoW (merged-mined) blocks append a CAuxPow blob between the
+        header and the transactions.  The blob's parent block header is
+        itself algo-aware; in particular a CryptoNight parent is serialized
+        as a raw length-prefixed vector rather than a fixed 80-byte header.
+
+    Mirrors Bitmark's primitives/{pureheader,block}.h serialization.  See
+    project-bitmark/bitmark-kernel/unwrap.js for the reference walker.
+    Bitmark predates SegWit, so transactions are read non-witness.
+    '''
+
+    ALGO_EQUIHASH = 6
+    ALGO_CRYPTONIGHT = 7
+
+    @staticmethod
+    def algo_of(version):
+        return (version >> 9) & 7
+
+    def _walk_pure_header(self, is_parent=False, parent_algo=None):
+        '''Advance the cursor past one CPureBlockHeader.'''
+        if is_parent and parent_algo == self.ALGO_CRYPTONIGHT:
+            # CryptoNight parent header is stored as a raw length-prefixed
+            # vector (variable size) -- not a fixed 80-byte header.
+            size = self._read_varint()
+            self.cursor += size
+            return
+        if is_parent:
+            algo = parent_algo
+        else:
+            start = self.cursor
+            algo = self.algo_of(self._read_le_uint32())
+            self.cursor = start
+        self.cursor += 4 + 32 + 32                  # version + prevBlock + merkleRoot
+        if algo == self.ALGO_EQUIHASH:
+            self.cursor += 32                       # hashReserved
+        self.cursor += 4 + 4                        # nTime + nBits
+        if algo == self.ALGO_EQUIHASH:
+            self.cursor += 32                       # nNonce (256-bit)
+            solution_size = self._read_varint()
+            self.cursor += solution_size            # nSolution vector
+        else:
+            self.cursor += 4                        # nNonce
+
+    def _walk_auxpow(self, main_algo):
+        '''Advance the cursor past a CAuxPow blob.
+
+        CAuxPow = CMerkleTx + vChainMerkleBranch + nChainIndex + parentBlock.
+        CMerkleTx = CMutableTransaction + hashBlock + vMerkleBranch + nIndex.
+        For CryptoNight/Equihash main algos the CMutableTransaction is
+        serialized as an opaque length-prefixed vector (vector_format), and a
+        CryptoNight parentBlock is likewise an opaque vector (see Bitmark
+        primitives/{block,transaction,pureheader}.h).'''
+        if main_algo in (self.ALGO_EQUIHASH, self.ALGO_CRYPTONIGHT):
+            tx_size = self._read_varint()
+            self.cursor += tx_size                  # opaque parent coinbase (vector_rep)
+        else:
+            self.read_tx()                          # parent coinbase (CMerkleTx body)
+        self.cursor += 32                           # hashBlock
+        merkle_size = self._read_varint()
+        self.cursor += 32 * merkle_size             # vMerkleBranch
+        self.cursor += 4                            # nIndex
+        chain_merkle_size = self._read_varint()
+        self.cursor += 32 * chain_merkle_size       # vChainMerkleBranch
+        self.cursor += 4                            # nChainIndex
+        self._walk_pure_header(is_parent=True, parent_algo=main_algo)
+
+    def read_header(self, static_header_size):
+        '''Return all bytes from the header start to the first transaction
+        (pure header + any auxpow blob).  Its length is where txs begin.'''
+        start = self.cursor
+        version = self._read_le_uint32()
+        self.cursor = start
+        self._walk_pure_header()
+        if version & self.VERSION_AUXPOW:
+            self._walk_auxpow(self.algo_of(version))
+        end = self.cursor
+        self.cursor = start
+        return self._read_nbytes(end - start)
+
+    @classmethod
+    def pure_header_len(cls, header):
+        '''Length of the pure header (the bytes that form the block identity
+        hash): 80 for standard algos, the full extended header for equihash.'''
+        version = int.from_bytes(header[:4], 'little')
+        if cls.algo_of(version) != cls.ALGO_EQUIHASH:
+            return 80
+        cursor = 4 + 32 + 32 + 32 + 4 + 4 + 32      # through nNonce256
+        n = header[cursor]
+        cursor += 1
+        if n < 253:
+            sol = n
+        elif n == 253:
+            sol = int.from_bytes(header[cursor:cursor + 2], 'little'); cursor += 2
+        elif n == 254:
+            sol = int.from_bytes(header[cursor:cursor + 4], 'little'); cursor += 4
+        else:
+            sol = int.from_bytes(header[cursor:cursor + 8], 'little'); cursor += 8
+        return cursor + sol
+
+
 class DeserializerEquihash(Deserializer):
     def read_header(self, static_header_size):
         '''Return the block header bytes'''

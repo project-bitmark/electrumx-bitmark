@@ -2929,13 +2929,19 @@ class Myriadcoin(AuxPowMixin, Coin):
 
 
 class Bitmark(AuxPowMixin, Coin):
-    # Bitmark is a Myriadcoin-family chain: multi-algorithm PoW with the
-    # algorithm encoded in the version field, plus AuxPoW (merged mining)
-    # on some blocks.  ElectrumX trusts the daemon for PoW validation, so
-    # the block identity hash is the standard double-SHA256 of the 80-byte
-    # base header (Bitmark's `hash`, distinct from its algo-specific
-    # `powhash`).  Bitmark does not use SegWit, so the non-SegWit AuxPow
-    # deserializer is used.
+    # Bitmark is a multi-algorithm PoW chain (8 algos) with the algorithm
+    # encoded in the version field (bit 8 = auxpow, bits 9-11 = algo).  The
+    # header layout and identity hash vary per block:
+    #   * standard algos -> 80-byte header, hash = dsha256(header[:80])
+    #     (Bitmark GetHash)
+    #   * equihash       -> extended header (hashReserved + 256-bit nonce +
+    #     solution vector), hash = dsha256(full pure header) (GetHashE)
+    # AuxPoW (merged-mined) blocks append a CAuxPow blob (with an algo-aware,
+    # possibly variable-length parent header) before the transactions.
+    # ElectrumX trusts the daemon for PoW, so only the identity hash matters;
+    # see DeserializerBitmark for the byte layout.  Multi-algo activates at
+    # height 450,947; below that every block is single-algo scrypt.
+    # Bitmark predates SegWit/Taproot (2014-era), so no witness handling.
     NAME = "Bitmark"
     SHORTNAME = "BTM"
     NET = "mainnet"
@@ -2943,12 +2949,22 @@ class Bitmark(AuxPowMixin, Coin):
     P2SH_VERBYTES = (bytes.fromhex("05"),)
     GENESIS_HASH = ('c1fb746e87e89ae75bdec2ef0639a1f6'
                     '786744639ce3d0ece1dcf979b79137cb')
-    DESERIALIZER = lib_tx.DeserializerAuxPow
+    DESERIALIZER = lib_tx.DeserializerBitmark
     TX_COUNT = 2400000
     TX_COUNT_HEIGHT = 2399830
     TX_PER_BLOCK = 2
     REORG_LIMIT = 2000
     RPC_PORT = 9266
+
+    @classmethod
+    def header_hash_rev(cls, header):
+        '''Bitmark block identity hash: dsha256 of the pure header only.
+
+        For standard algos that's the 80-byte header (GetHash); for equihash
+        it's the full extended header (GetHashE).  Any trailing auxpow blob
+        stored in `header` is excluded from the identity hash.'''
+        pure_len = cls.DESERIALIZER.pure_header_len(header)
+        return double_sha256(header[:pure_len])
 
 
 class BitmarkTestnet(Bitmark):
